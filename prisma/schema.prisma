@@ -1,0 +1,211 @@
+// Deliverables Management API — data model
+// NOTE: no hard deletes anywhere. Every deletable model carries `deletedAt`.
+// TaskAuditLog is append-only: no `updatedAt`, no `deletedAt`, enforced by a
+// DB trigger migration (see prisma/migrations/*_audit_log_immutable).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  PM
+  INTERNAL
+  CLIENT
+}
+
+enum Department {
+  UIUX
+  FRONTEND
+  BACKEND
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+  DEPENDENCY_ADD
+  DEPENDENCY_REMOVE
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  name         String
+  passwordHash String
+  role         Role        @default(INTERNAL)
+  department   Department?
+  avatarUrl    String?
+  // Incremented on logout; embedded in JWT. Tokens with an older
+  // tokenVersion are rejected by the auth middleware.
+  tokenVersion Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+
+  memberships    ProjectMember[]
+  assignedTasks  Task[]          @relation("TaskAssignee")
+  attachments    Attachment[]
+  comments       Comment[]
+  auditLogs      TaskAuditLog[]
+
+  @@index([role])
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  members   ProjectMember[]
+  tasks     Task[]
+  auditLogs TaskAuditLog[]
+
+  @@index([deletedAt])
+}
+
+model ProjectMember {
+  id        String    @id @default(uuid())
+  projectId String
+  userId    String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  // Soft-deleted memberships keep their row, so re-adding a member is
+  // handled by un-deleting in the service layer.
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model Task {
+  id            String      @id @default(uuid())
+  projectId     String
+  title         String
+  description   String?
+  status        TaskStatus  @default(TODO)
+  priority      Priority    @default(MEDIUM)
+  dueDate       DateTime?
+  department    Department?
+  assigneeId    String?
+  clientVisible Boolean     @default(false)
+  // Client-safe texts; clients get these instead of internal title/summary
+  // when set. Decide + document: client view falls back to a masked notice
+  // when clientTitle is absent.
+  clientTitle   String?
+  clientSummary String?
+  // Optimistic locking: incremented on every successful write.
+  version       Int         @default(1)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+
+  project  Project @relation(fields: [projectId], references: [id])
+  assignee User?   @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  dependenciesAsTask   TaskDependency[] @relation("TaskDependencyDependent")
+  dependenciesAsPrereq TaskDependency[] @relation("TaskDependencyPrerequisite")
+  attachments          Attachment[]
+  comments             Comment[]
+  auditLogs            TaskAuditLog[]
+
+  @@index([projectId, status])
+  @@index([assigneeId])
+  @@index([projectId, deletedAt])
+}
+
+model TaskDependency {
+  id          String    @id @default(uuid())
+  taskId      String
+  dependsOnId String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  task      Task @relation("TaskDependencyDependent", fields: [taskId], references: [id])
+  dependsOn Task @relation("TaskDependencyPrerequisite", fields: [dependsOnId], references: [id])
+
+  @@unique([taskId, dependsOnId])
+  @@index([taskId])
+  @@index([dependsOnId])
+}
+
+model Attachment {
+  id           String    @id @default(uuid())
+  taskId       String
+  uploadedById String
+  fileName     String
+  url          String
+  mimeType     String
+  size         Int
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  task       Task @relation(fields: [taskId], references: [id])
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+
+  @@index([taskId])
+}
+
+model Comment {
+  id         String    @id @default(uuid())
+  taskId     String
+  authorId   String
+  body       String
+  isInternal Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  task   Task @relation(fields: [taskId], references: [id])
+  author User @relation(fields: [authorId], references: [id])
+
+  @@index([taskId, createdAt])
+}
+
+// Append-only. UPDATE/DELETE are rejected by a PostgreSQL trigger
+// (raw-SQL migration). Rows are written inside the same transaction as
+// the change they describe.
+model TaskAuditLog {
+  id        String      @id @default(uuid())
+  taskId    String
+  projectId String
+  userId    String
+  column    String
+  oldValue  String?
+  newValue  String?
+  action    AuditAction
+  createdAt DateTime    @default(now())
+
+  task    Task    @relation(fields: [taskId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([taskId, createdAt])
+  @@index([projectId, createdAt])
+}

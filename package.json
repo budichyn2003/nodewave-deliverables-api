@@ -1,0 +1,36 @@
+{
+  "name": "nodewave-deliverables-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch run src/index.ts",
+    "build": "bun build src/index.ts --target bun --outdir dist",
+    "start": "prisma migrate deploy && bun run dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "biome check --write .",
+    "test": "bun test",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "bun run prisma/seed.ts",
+    "db:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@nodewave/prisma-ezfilter": "^0.2.1",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "hono": "^4.13.10",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "@types/bun": "latest",
+    "@types/jsonwebtoken": "^9.0.3",
+    "dotenv": "^16.4.5",
+    "prisma": "^7.10.0",
+    "typescript": "^7.0.2"
+  }
+}
